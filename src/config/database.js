@@ -1,5 +1,5 @@
 const { Sequelize } = require("sequelize");
-require("dotenv").config({ path: "./config.env" });
+require("dotenv").config({ path: "./.env" });
 const config = {
   development: {
     username: process.env.DB_USER,
