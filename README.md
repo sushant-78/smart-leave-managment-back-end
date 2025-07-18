@@ -182,7 +182,7 @@ smart-leave-managment-back-end/
 │   └── app.js                     # Main application file
 │
 ├── 📄 package.json                # Dependencies and scripts
-├── 📄 config.env                  # Environment variables
+├── 📄 .env                        # Environment variables
 ├── 📄 README.md                   # This file
 └── 📄 .gitignore                  # Git ignore rules
 ```
@@ -279,10 +279,10 @@ Copy the environment template and configure your settings:
 
 ```bash
 # Copy environment template
-cp config.env.example config.env
+cp env.example .env
 
 # Edit configuration
-nano config.env
+nano .env
 ```
 
 ### Step 4: Database Setup

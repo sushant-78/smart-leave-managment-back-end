@@ -1,4 +1,4 @@
-require("dotenv").config({ path: "./config.env" });
+require("dotenv").config({ path: "./.env" });
 
 const JWT_CONFIG = {
   secret: process.env.JWT_SECRET,
