@@ -4,8 +4,12 @@ const {
   requireAdmin,
   requireOwnershipOrAdmin,
 } = require("../middleware/roleCheck");
-const { validateUserCreation } = require("../middleware/validation");
 const {
+  validateUserCreation,
+  validateUserUpdate,
+} = require("../middleware/validation");
+const {
+  getEmployeeDashboard,
   getAllUsers,
   getUserById,
   createUser,
@@ -19,6 +23,9 @@ const router = express.Router();
 
 // All routes require authentication
 router.use(authMiddleware);
+
+// GET /api/users/dashboard - Get employee dashboard data
+router.get("/employees/dashboard", getEmployeeDashboard);
 
 // GET /api/users - Get all users (Admin only)
 router.get("/", requireAdmin, getAllUsers);
@@ -35,8 +42,8 @@ router.get("/:id", requireOwnershipOrAdmin, getUserById);
 // POST /api/users - Create new user (Admin only)
 router.post("/", requireAdmin, validateUserCreation, createUser);
 
-// PUT /api/users/:id - Update user (Admin only)
-router.put("/:id", requireAdmin, validateUserCreation, updateUser);
+// PATCH /api/users/:id - Update user (Admin only)
+router.patch("/:id", requireAdmin, validateUserUpdate, updateUser);
 
 // DELETE /api/users/:id - Delete user (Admin only)
 router.delete("/:id", requireAdmin, deleteUser);

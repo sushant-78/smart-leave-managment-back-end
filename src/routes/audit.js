@@ -4,7 +4,6 @@ const { requireAdmin } = require("../middleware/roleCheck");
 const {
   getAllAuditLogs,
   getMyAuditLogs,
-  getAuditLogsByUser,
 } = require("../controllers/auditController");
 
 const router = express.Router();
@@ -13,12 +12,13 @@ const router = express.Router();
 router.use(authMiddleware);
 
 // GET /api/audit - Get all audit logs (Admin only)
+// Query Parameters: page, limit, action_type
+// Used by: Admin audit logs page
 router.get("/", requireAdmin, getAllAuditLogs);
 
-// GET /api/audit/me - Get own audit logs (All users)
+// GET /api/audit/me - Get own audit logs (All authenticated users)
+// Query Parameters: page, limit
+// Used by: User's own audit logs
 router.get("/me", getMyAuditLogs);
-
-// GET /api/audit/user/:id - Get audit logs for specific user (Admin only)
-router.get("/user/:id", requireAdmin, getAuditLogsByUser);
 
 module.exports = router;

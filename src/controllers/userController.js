@@ -1,22 +1,109 @@
-const { User, AuditLog, sequelize } = require("../models");
-const { validateUser } = require("../middleware/validation");
+const { User, Leave, SystemConfig, AuditLog, sequelize } = require("../models");
 const { ACTION_TYPES, ROLES } = require("../config/auth");
+
+// Get employee dashboard data
+const getEmployeeDashboard = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const currentYear = new Date().getFullYear();
+
+    // Get system configuration for current year
+    const systemConfig = await SystemConfig.getConfigByYear(currentYear);
+
+    // Get leave balances
+    const leaveBalances = [];
+    if (systemConfig && systemConfig.leave_types) {
+      for (const [type, total] of Object.entries(systemConfig.leave_types)) {
+        // Count used leaves for this type
+        const usedLeaves = await Leave.count({
+          where: {
+            created_by: userId,
+            type: type,
+            status: ["approved", "pending"],
+          },
+        });
+
+        leaveBalances.push({
+          type,
+          total: total || 0,
+          used: usedLeaves,
+          remaining: Math.max(0, (total || 0) - usedLeaves),
+        });
+      }
+    }
+
+    // Get latest pending request
+    const latestPendingRequest = await Leave.findOne({
+      where: {
+        created_by: userId,
+        status: "pending",
+      },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: [
+            "id",
+            "name",
+            "email",
+            "role",
+            "manager_id",
+            "created_at",
+            "updated_at",
+          ],
+          include: [
+            {
+              model: User,
+              as: "manager",
+              attributes: ["id", "name", "email", "role"],
+            },
+            {
+              model: User,
+              as: "reportees",
+              attributes: ["id", "name", "email", "role"],
+            },
+          ],
+        },
+        {
+          model: User,
+          as: "manager",
+          attributes: ["id", "name", "email", "role"],
+        },
+      ],
+      order: [["created_at", "DESC"]],
+    });
+
+    res.json({
+      success: true,
+      data: {
+        currentYear,
+        systemConfig: systemConfig || {},
+        leaveBalances,
+        latestPendingRequest: latestPendingRequest || {},
+      },
+    });
+  } catch (error) {
+    console.error("Get employee dashboard error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
 
 // Get all users (Admin only)
 const getAllUsers = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = "", role = "" } = req.query;
+    const { page = 1, limit = 10, role = "", search = "" } = req.query;
     const offset = (page - 1) * limit;
 
-    const whereClause = {};
+    let whereClause = {};
+    if (role) whereClause.role = role;
     if (search) {
       whereClause[sequelize.Op.or] = [
         { name: { [sequelize.Op.like]: `%${search}%` } },
         { email: { [sequelize.Op.like]: `%${search}%` } },
       ];
-    }
-    if (role) {
-      whereClause.role = role;
     }
 
     const { count, rows: users } = await User.findAndCountAll({
@@ -25,11 +112,6 @@ const getAllUsers = async (req, res) => {
         {
           model: User,
           as: "manager",
-          attributes: ["id", "name", "email"],
-        },
-        {
-          model: User,
-          as: "reportees",
           attributes: ["id", "name", "email"],
         },
       ],
@@ -74,7 +156,7 @@ const getUserById = async (req, res) => {
         {
           model: User,
           as: "reportees",
-          attributes: ["id", "name", "email"],
+          attributes: ["id", "name", "email", "role"],
         },
       ],
     });
@@ -99,19 +181,10 @@ const getUserById = async (req, res) => {
   }
 };
 
-// Create new user (Admin only)
+// Create user (Admin only)
 const createUser = async (req, res) => {
   try {
     const { name, email, password, role, manager_id } = req.body;
-
-    // Check if email already exists
-    const existingUser = await User.findByEmail(email);
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already exists",
-      });
-    }
 
     // Validate manager assignment
     if (manager_id) {
@@ -134,19 +207,7 @@ const createUser = async (req, res) => {
     });
 
     // Log user creation
-    await AuditLog.logAction(
-      req.user.id,
-      ACTION_TYPES.USER_CREATED,
-      user.id.toString(),
-      {
-        created_user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      }
-    );
+    await AuditLog.logAction(req.user.id, "user", user.id.toString(), "create");
 
     // Email simulation
     console.log(
@@ -226,25 +287,19 @@ const updateUser = async (req, res) => {
       }
     }
 
-    // Update user
+    // Update user - only update provided fields
     const oldData = { ...user.toJSON() };
-    await user.update({
-      name: name || user.name,
-      email: email || user.email,
-      role: role || user.role,
-      manager_id: manager_id !== undefined ? manager_id : user.manager_id,
-    });
+    const updateData = {};
+
+    if (name !== undefined) updateData.name = name;
+    if (email !== undefined) updateData.email = email;
+    if (role !== undefined) updateData.role = role;
+    if (manager_id !== undefined) updateData.manager_id = manager_id;
+
+    await user.update(updateData);
 
     // Log user update
-    await AuditLog.logAction(
-      req.user.id,
-      ACTION_TYPES.USER_UPDATED,
-      user.id.toString(),
-      {
-        old_data: oldData,
-        new_data: user.toJSON(),
-      }
-    );
+    await AuditLog.logAction(req.user.id, "user", user.id.toString(), "update");
 
     // Email simulation
     console.log(`Email to ${user.email}: Your profile has been updated.`);
@@ -293,14 +348,7 @@ const deleteUser = async (req, res) => {
     }
 
     // Log user deletion
-    await AuditLog.logAction(
-      req.user.id,
-      ACTION_TYPES.USER_DELETED,
-      user.id.toString(),
-      {
-        deleted_user: { id: user.id, name: user.name, email: user.email },
-      }
-    );
+    await AuditLog.logAction(req.user.id, "user", user.id.toString(), "delete");
 
     // Email simulation
     console.log(`Email to ${user.email}: Your account has been deleted.`);
@@ -339,7 +387,7 @@ const getUnassignedUsers = async (req, res) => {
   }
 };
 
-// Get all managers (Admin only)
+// Get managers (Admin only)
 const getManagers = async (req, res) => {
   try {
     const managers = await User.findManagers();
@@ -358,6 +406,7 @@ const getManagers = async (req, res) => {
 };
 
 module.exports = {
+  getEmployeeDashboard,
   getAllUsers,
   getUserById,
   createUser,

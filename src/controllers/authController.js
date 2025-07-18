@@ -30,7 +30,7 @@ const login = async (req, res) => {
     const token = generateToken(user.id);
 
     // Log login action
-    await AuditLog.logAction(user.id, "user_login", user.id.toString());
+    await AuditLog.logAction(user.id, "auth", user.id.toString(), "login");
 
     // Email simulation
     console.log(`Email to ${user.email}: Welcome back ${user.name}!`);
@@ -94,7 +94,7 @@ const logout = async (req, res) => {
     const user = req.user;
 
     // Log logout action
-    await AuditLog.logAction(user.id, "user_logout", user.id.toString());
+    await AuditLog.logAction(user.id, "auth", user.id.toString(), "logout");
 
     // Email simulation
     console.log(`Email to ${user.email}: Goodbye ${user.name}!`);

@@ -1,41 +1,26 @@
-const { AuditLog, User } = require('../models');
-const { ROLES } = require('../config/auth');
+const { AuditLog, User } = require("../models");
 
 // Admin: Get all audit logs (with optional filters)
 const getAllAuditLogs = async (req, res) => {
   try {
-    const { user_id, action_type, start_date, end_date, page = 1, limit = 20 } = req.query;
+    const { action_type, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
     const where = {};
 
-    if (user_id) where.action_by = user_id;
-    if (action_type) where.action_type = action_type;
-    if (start_date && end_date) {
-      where.timestamp = {
-        [AuditLog.sequelize.Op.between]: [new Date(start_date), new Date(end_date)]
-      };
-    } else if (start_date) {
-      where.timestamp = {
-        [AuditLog.sequelize.Op.gte]: new Date(start_date)
-      };
-    } else if (end_date) {
-      where.timestamp = {
-        [AuditLog.sequelize.Op.lte]: new Date(end_date)
-      };
-    }
+    if (action_type) where.action = action_type;
 
     const { count, rows: logs } = await AuditLog.findAndCountAll({
       where,
       include: [
         {
           model: User,
-          as: 'user',
-          attributes: ['id', 'name', 'email', 'role']
-        }
+          as: "user",
+          attributes: ["id", "name", "email"],
+        },
       ],
-      order: [['timestamp', 'DESC']],
+      order: [["created_at", "DESC"]],
       limit: parseInt(limit),
-      offset: parseInt(offset)
+      offset: parseInt(offset),
     });
 
     res.json({
@@ -46,15 +31,15 @@ const getAllAuditLogs = async (req, res) => {
           page: parseInt(page),
           limit: parseInt(limit),
           total: count,
-          pages: Math.ceil(count / limit)
-        }
-      }
+          pages: Math.ceil(count / limit),
+        },
+      },
     });
   } catch (error) {
-    console.error('Get all audit logs error:', error);
+    console.error("Get all audit logs error:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -67,10 +52,17 @@ const getMyAuditLogs = async (req, res) => {
     const offset = (page - 1) * limit;
 
     const { count, rows: logs } = await AuditLog.findAndCountAll({
-      where: { action_by: userId },
-      order: [['timestamp', 'DESC']],
+      where: { created_by: userId },
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "name", "email"],
+        },
+      ],
+      order: [["created_at", "DESC"]],
       limit: parseInt(limit),
-      offset: parseInt(offset)
+      offset: parseInt(offset),
     });
 
     res.json({
@@ -81,50 +73,15 @@ const getMyAuditLogs = async (req, res) => {
           page: parseInt(page),
           limit: parseInt(limit),
           total: count,
-          pages: Math.ceil(count / limit)
-        }
-      }
+          pages: Math.ceil(count / limit),
+        },
+      },
     });
   } catch (error) {
-    console.error('Get my audit logs error:', error);
+    console.error("Get my audit logs error:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
-// Admin: Get audit logs for a specific user
-const getAuditLogsByUser = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
-
-    const { count, rows: logs } = await AuditLog.findAndCountAll({
-      where: { action_by: id },
-      order: [['timestamp', 'DESC']],
-      limit: parseInt(limit),
-      offset: parseInt(offset)
-    });
-
-    res.json({
-      success: true,
-      data: {
-        logs,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: count,
-          pages: Math.ceil(count / limit)
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Get audit logs by user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -132,5 +89,4 @@ const getAuditLogsByUser = async (req, res) => {
 module.exports = {
   getAllAuditLogs,
   getMyAuditLogs,
-  getAuditLogsByUser
-}; 
+};

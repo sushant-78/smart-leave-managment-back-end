@@ -22,32 +22,38 @@ const SystemConfig = sequelize.define(
     },
     working_days_per_week: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true,
       validate: {
-        notEmpty: true,
         isIn: [[4, 5, 6]],
       },
     },
     holidays: {
       type: DataTypes.JSON,
-      allowNull: false,
-      defaultValue: [],
+      allowNull: true,
+      defaultValue: {},
       validate: {
-        isArray: true,
+        isObject: function (value) {
+          return value === null || typeof value === "object";
+        },
       },
     },
     leave_types: {
       type: DataTypes.JSON,
-      allowNull: false,
+      allowNull: true,
       defaultValue: {},
       validate: {
-        isObject: true,
+        isObject: function (value) {
+          return value === null || typeof value === "object";
+        },
       },
     },
-    is_locked: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
+    created_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: "Users",
+        key: "id",
+      },
     },
   },
   {
@@ -57,17 +63,9 @@ const SystemConfig = sequelize.define(
 );
 
 // Instance methods
-SystemConfig.prototype.canBeModified = function () {
-  return !this.is_locked;
-};
-
-SystemConfig.prototype.lock = function () {
-  this.is_locked = true;
-};
-
 SystemConfig.prototype.isHoliday = function (date) {
   const dateStr = date.toISOString().split("T")[0];
-  return this.holidays.includes(dateStr);
+  return this.holidays.hasOwnProperty(dateStr);
 };
 
 SystemConfig.prototype.isWeekend = function (date) {
@@ -104,16 +102,30 @@ SystemConfig.getCurrentYearConfig = function () {
   const currentYear = new Date().getFullYear();
   return this.findOne({
     where: { year: currentYear },
+    include: [
+      {
+        model: require("./User"),
+        as: "creator",
+        attributes: ["id", "name", "email"],
+      },
+    ],
   });
 };
 
 SystemConfig.getConfigByYear = function (year) {
   return this.findOne({
     where: { year },
+    include: [
+      {
+        model: require("./User"),
+        as: "creator",
+        attributes: ["id", "name", "email"],
+      },
+    ],
   });
 };
 
-SystemConfig.createYearlyConfig = async function (year, config) {
+SystemConfig.createYearlyConfig = async function (year, config, createdBy) {
   const existingConfig = await this.findOne({ where: { year } });
 
   if (existingConfig) {
@@ -123,9 +135,9 @@ SystemConfig.createYearlyConfig = async function (year, config) {
   return this.create({
     year,
     working_days_per_week: config.working_days_per_week,
-    holidays: config.holidays || [],
+    holidays: config.holidays || {},
     leave_types: config.leave_types || {},
-    is_locked: false,
+    created_by: createdBy || null,
   });
 };
 
@@ -136,23 +148,36 @@ SystemConfig.updateConfig = async function (year, updates) {
     throw new Error(`Configuration for year ${year} not found`);
   }
 
-  if (config.is_locked) {
-    throw new Error(
-      `Configuration for year ${year} is locked and cannot be modified`
-    );
-  }
-
   return config.update(updates);
 };
 
-SystemConfig.lockConfig = async function (year) {
+SystemConfig.upsertConfig = async function (year, updates, createdBy) {
   const config = await this.findOne({ where: { year } });
 
-  if (!config) {
-    throw new Error(`Configuration for year ${year} not found`);
+  if (config) {
+    // Update existing config - merge with existing data
+    const mergedUpdates = {
+      working_days_per_week:
+        updates.working_days_per_week !== undefined
+          ? updates.working_days_per_week
+          : config.working_days_per_week,
+      holidays:
+        updates.holidays !== undefined ? updates.holidays : config.holidays,
+      leave_types:
+        updates.leave_types !== undefined
+          ? updates.leave_types
+          : config.leave_types,
+    };
+    return config.update(mergedUpdates);
+  } else {
+    // Create new config with only the provided fields
+    const newConfig = {
+      year,
+      created_by: createdBy || null,
+      ...updates,
+    };
+    return this.create(newConfig);
   }
-
-  return config.update({ is_locked: true });
 };
 
 SystemConfig.getDefaultLeaveTypes = function () {
@@ -164,20 +189,23 @@ SystemConfig.getDefaultLeaveTypes = function () {
 };
 
 SystemConfig.validateHolidays = function (holidays) {
-  if (!Array.isArray(holidays)) {
-    throw new Error("Holidays must be an array");
+  if (typeof holidays !== "object" || holidays === null) {
+    throw new Error("Holidays must be an object");
   }
 
-  const currentYear = new Date().getFullYear();
-
-  for (const holiday of holidays) {
-    const date = new Date(holiday);
-    if (isNaN(date.getTime())) {
-      throw new Error(`Invalid date format: ${holiday}`);
+  for (const [date, title] of Object.entries(holidays)) {
+    const dateObj = new Date(date);
+    if (isNaN(dateObj.getTime())) {
+      throw new Error(`Invalid date format: ${date}`);
     }
 
-    if (date.getFullYear() !== currentYear) {
-      throw new Error(`Holiday date ${holiday} must be in the current year`);
+    if (typeof title !== "string" || title.trim() === "") {
+      throw new Error(`Invalid title for date ${date}`);
+    }
+
+    // Check if it's a Sunday
+    if (dateObj.getDay() === 0) {
+      throw new Error(`Cannot set Sunday (${date}) as a holiday`);
     }
   }
 
@@ -200,7 +228,11 @@ SystemConfig.validateLeaveTypes = function (leaveTypes) {
 
 // Associations
 SystemConfig.associate = (models) => {
-  // No direct associations needed for system config
+  // Association with User who created the config
+  SystemConfig.belongsTo(models.User, {
+    foreignKey: "created_by",
+    as: "creator",
+  });
 };
 
 module.exports = SystemConfig;

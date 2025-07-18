@@ -11,7 +11,7 @@ const APP_CONFIG = {
 const CORS_OPTIONS = {
   origin: APP_CONFIG.corsOrigin,
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 

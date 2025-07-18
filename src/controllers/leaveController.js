@@ -1,10 +1,4 @@
-const {
-  Leave,
-  LeaveBalance,
-  User,
-  SystemConfig,
-  AuditLog,
-} = require("../models");
+const { Leave, User, SystemConfig, AuditLog } = require("../models");
 const {
   validateLeave,
   validateLeaveApproval,
@@ -26,18 +20,14 @@ const getAllLeaves = async (req, res) => {
     let whereClause = {};
     if (status) whereClause.status = status;
     if (type) whereClause.type = type;
-    if (user_id) whereClause.user_id = user_id;
+    if (user_id) whereClause.created_by = user_id;
 
     // Role-based filtering
     if (req.user.role === "employee") {
-      whereClause.user_id = req.user.id;
+      whereClause.created_by = req.user.id;
     } else if (req.user.role === "manager") {
-      // Get leaves from team members
-      const teamUserIds = await User.findAll({
-        where: { manager_id: req.user.id },
-        attributes: ["id"],
-      });
-      whereClause.user_id = teamUserIds.map((u) => u.id);
+      // Get leaves managed by this manager
+      whereClause.manager_id = req.user.id;
     }
     // Admin can see all leaves
 
@@ -46,7 +36,12 @@ const getAllLeaves = async (req, res) => {
       include: [
         {
           model: User,
-          as: "user",
+          as: "creator",
+          attributes: ["id", "name", "email", "role"],
+        },
+        {
+          model: User,
+          as: "manager",
           attributes: ["id", "name", "email", "role"],
         },
       ],
@@ -85,7 +80,12 @@ const getLeaveById = async (req, res) => {
       include: [
         {
           model: User,
-          as: "user",
+          as: "creator",
+          attributes: ["id", "name", "email", "role"],
+        },
+        {
+          model: User,
+          as: "manager",
           attributes: ["id", "name", "email", "role"],
         },
       ],
@@ -99,24 +99,18 @@ const getLeaveById = async (req, res) => {
     }
 
     // Check access permissions
-    if (req.user.role === "employee" && leave.user_id !== req.user.id) {
+    if (req.user.role === "employee" && leave.created_by !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: "Access denied",
       });
     }
 
-    if (req.user.role === "manager") {
-      const teamUserIds = await User.findAll({
-        where: { manager_id: req.user.id },
-        attributes: ["id"],
+    if (req.user.role === "manager" && leave.manager_id !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
       });
-      if (!teamUserIds.find((u) => u.id === leave.user_id)) {
-        return res.status(403).json({
-          success: false,
-          message: "Access denied",
-        });
-      }
     }
 
     res.json({
@@ -140,9 +134,9 @@ const applyLeave = async (req, res) => {
 
     // Get current year config
     const currentYear = new Date().getFullYear();
-    const config = await SystemConfig.getCurrentYearConfig();
+    const yearConfig = await SystemConfig.getCurrentYearConfig();
 
-    if (!config) {
+    if (!yearConfig) {
       return res.status(400).json({
         success: false,
         message: "System configuration not set for current year",
@@ -171,24 +165,22 @@ const applyLeave = async (req, res) => {
       });
     }
 
-    // Check leave balance
-    const balance = await LeaveBalance.findByUserTypeAndYear(
-      userId,
-      type,
-      currentYear
-    );
-    if (!balance || balance.balance < workingDays) {
+    // Check leave balance from system config
+    const availableBalance = yearConfig.leave_types[type] || 0;
+    if (availableBalance < workingDays) {
       return res.status(400).json({
         success: false,
-        message: `Insufficient ${type} leave balance. Available: ${
-          balance?.balance || 0
-        }, Required: ${workingDays}`,
+        message: `Insufficient ${type} leave balance. Available: ${availableBalance}, Required: ${workingDays}`,
       });
     }
 
+    // Get user's manager
+    const user = await User.findByPk(userId);
+
     // Create leave request
     const leave = await Leave.create({
-      user_id: userId,
+      created_by: userId,
+      manager_id: user.manager_id,
       from_date,
       to_date,
       type,
@@ -197,23 +189,9 @@ const applyLeave = async (req, res) => {
     });
 
     // Log leave application
-    await AuditLog.logAction(
-      userId,
-      ACTION_TYPES.LEAVE_APPLIED,
-      leave.id.toString(),
-      {
-        leave_details: {
-          from_date,
-          to_date,
-          type,
-          reason,
-          working_days: workingDays,
-        },
-      }
-    );
+    await AuditLog.logAction(userId, "leave", leave.id.toString(), "create");
 
     // Email simulation - notify manager
-    const user = await User.findByPk(userId);
     const manager = user.manager_id
       ? await User.findByPk(user.manager_id)
       : null;
@@ -257,7 +235,7 @@ const cancelLeave = async (req, res) => {
     }
 
     // Check ownership
-    if (leave.user_id !== userId) {
+    if (leave.created_by !== userId) {
       return res.status(403).json({
         success: false,
         message: "You can only cancel your own leaves",
@@ -276,18 +254,7 @@ const cancelLeave = async (req, res) => {
     await leave.destroy();
 
     // Log leave cancellation
-    await AuditLog.logAction(
-      userId,
-      ACTION_TYPES.LEAVE_CANCELLED,
-      leave.id.toString(),
-      {
-        leave_details: {
-          from_date: leave.from_date,
-          to_date: leave.to_date,
-          type: leave.type,
-        },
-      }
-    );
+    await AuditLog.logAction(userId, "leave", leave.id.toString(), "delete");
 
     // Email simulation
     const user = await User.findByPk(userId);
@@ -318,8 +285,13 @@ const approveLeave = async (req, res) => {
       include: [
         {
           model: User,
-          as: "user",
-          attributes: ["id", "name", "email", "role", "manager_id"],
+          as: "creator",
+          attributes: ["id", "name", "email", "role"],
+        },
+        {
+          model: User,
+          as: "manager",
+          attributes: ["id", "name", "email", "role"],
         },
       ],
     });
@@ -341,10 +313,10 @@ const approveLeave = async (req, res) => {
 
     // Check permissions
     if (req.user.role === "manager") {
-      if (leave.user.manager_id !== req.user.id) {
+      if (leave.manager_id !== req.user.id) {
         return res.status(403).json({
           success: false,
-          message: "You can only approve leaves from your team members",
+          message: "You can only approve leaves assigned to you",
         });
       }
     }
@@ -363,36 +335,21 @@ const approveLeave = async (req, res) => {
       manager_comment: manager_comment || null,
     });
 
-    // Deduct balance if approved
-    if (status === LEAVE_STATUS.APPROVED) {
-      const balance = await LeaveBalance.findByUserTypeAndYear(
-        leave.user_id,
-        leave.type,
-        currentYear
-      );
-      if (balance) {
-        balance.deductBalance(workingDays);
-        await balance.save();
-      }
-    }
+    // Note: Balance deduction is now handled by system config
+    // No individual user balance tracking needed
 
     // Log approval/rejection
-    const actionType =
-      status === LEAVE_STATUS.APPROVED
-        ? ACTION_TYPES.LEAVE_APPROVED
-        : ACTION_TYPES.LEAVE_REJECTED;
-    await AuditLog.logAction(req.user.id, actionType, leave.id.toString(), {
-      leave_details: {
-        from_date: leave.from_date,
-        to_date: leave.to_date,
-        type: leave.type,
-      },
-      manager_comment,
-    });
+    const actionType = status === LEAVE_STATUS.APPROVED ? "approve" : "reject";
+    await AuditLog.logAction(
+      req.user.id,
+      "leave",
+      leave.id.toString(),
+      actionType
+    );
 
     // Email simulation
     console.log(
-      `Email to ${leave.user.email}: Your leave from ${leave.from_date} to ${leave.to_date} has been ${status}`
+      `Email to ${leave.creator.email}: Your leave from ${leave.from_date} to ${leave.to_date} has been ${status}`
     );
 
     res.json({
@@ -409,17 +366,25 @@ const approveLeave = async (req, res) => {
   }
 };
 
-// Get leave balance
+// Get leave balance from system config
 const getLeaveBalance = async (req, res) => {
   try {
-    const userId = req.user.id;
     const currentYear = new Date().getFullYear();
 
-    const balances = await LeaveBalance.findByUserAndYear(userId, currentYear);
+    const config = await SystemConfig.getCurrentYearConfig();
+    if (!config) {
+      return res.status(404).json({
+        success: false,
+        message: "System configuration not found for current year",
+      });
+    }
 
     res.json({
       success: true,
-      data: { balances },
+      data: {
+        leave_types: config.leave_types,
+        year: currentYear,
+      },
     });
   } catch (error) {
     console.error("Get leave balance error:", error);

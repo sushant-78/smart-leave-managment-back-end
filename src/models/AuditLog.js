@@ -1,6 +1,5 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../config/database");
-const { ACTION_TYPES } = require("../config/auth");
 
 const AuditLog = sequelize.define(
   "AuditLog",
@@ -10,75 +9,66 @@ const AuditLog = sequelize.define(
       primaryKey: true,
       autoIncrement: true,
     },
-    action_by: {
-      type: DataTypes.INTEGER,
+    created_at: {
+      type: DataTypes.DATE,
       allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
+    updated_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
+    created_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
       references: {
         model: "Users",
         key: "id",
       },
     },
-    action_type: {
-      type: DataTypes.STRING(100),
+    resource: {
+      type: DataTypes.STRING(50),
       allowNull: false,
       validate: {
         notEmpty: true,
-        isIn: [Object.values(ACTION_TYPES)],
       },
     },
-    action_target: {
+    resource_id: {
       type: DataTypes.STRING(255),
       allowNull: false,
       validate: {
         notEmpty: true,
       },
     },
-    details: {
-      type: DataTypes.JSON,
-      allowNull: true,
-    },
-    timestamp: {
-      type: DataTypes.DATE,
+    action: {
+      type: DataTypes.STRING(100),
       allowNull: false,
-      defaultValue: DataTypes.NOW,
+      validate: {
+        notEmpty: true,
+      },
     },
   },
   {
     tableName: "audit_logs",
-    timestamps: false,
-    indexes: [
-      {
-        fields: ["action_by"],
-      },
-      {
-        fields: ["action_type"],
-      },
-      {
-        fields: ["timestamp"],
-      },
-    ],
+    timestamps: true,
+    underscored: true,
   }
 );
 
 // Instance methods
 AuditLog.prototype.getFormattedTimestamp = function () {
-  return this.timestamp.toLocaleString();
+  return this.created_at.toLocaleString();
 };
 
 // Class methods
-AuditLog.logAction = async function (
-  actionBy,
-  actionType,
-  actionTarget,
-  details = null
-) {
+AuditLog.logAction = async function (createdBy, resource, resourceId, action) {
   try {
     return await this.create({
-      action_by: actionBy,
-      action_type: actionType,
-      action_target: actionTarget,
-      details: details,
-      timestamp: new Date(),
+      created_by: createdBy,
+      resource,
+      resource_id: resourceId,
+      action,
     });
   } catch (error) {
     console.error("Error logging action:", error);
@@ -89,8 +79,8 @@ AuditLog.logAction = async function (
 
 AuditLog.findByUser = function (userId, limit = 50) {
   return this.findAll({
-    where: { action_by: userId },
-    order: [["timestamp", "DESC"]],
+    where: { created_by: userId },
+    order: [["created_at", "DESC"]],
     limit: limit,
     include: [
       {
@@ -102,10 +92,25 @@ AuditLog.findByUser = function (userId, limit = 50) {
   });
 };
 
-AuditLog.findByActionType = function (actionType, limit = 100) {
+AuditLog.findByAction = function (action, limit = 100) {
   return this.findAll({
-    where: { action_type: actionType },
-    order: [["timestamp", "DESC"]],
+    where: { action },
+    order: [["created_at", "DESC"]],
+    limit: limit,
+    include: [
+      {
+        model: require("./User"),
+        as: "user",
+        attributes: ["id", "name", "email"],
+      },
+    ],
+  });
+};
+
+AuditLog.findByResource = function (resource, limit = 100) {
+  return this.findAll({
+    where: { resource },
+    order: [["created_at", "DESC"]],
     limit: limit,
     include: [
       {
@@ -120,11 +125,11 @@ AuditLog.findByActionType = function (actionType, limit = 100) {
 AuditLog.findByDateRange = function (startDate, endDate, limit = 100) {
   return this.findAll({
     where: {
-      timestamp: {
+      created_at: {
         [sequelize.Op.between]: [startDate, endDate],
       },
     },
-    order: [["timestamp", "DESC"]],
+    order: [["created_at", "DESC"]],
     limit: limit,
     include: [
       {
@@ -139,10 +144,10 @@ AuditLog.findByDateRange = function (startDate, endDate, limit = 100) {
 AuditLog.getSystemStats = async function () {
   const stats = await this.findAll({
     attributes: [
-      "action_type",
+      "action",
       [sequelize.fn("COUNT", sequelize.col("id")), "count"],
     ],
-    group: ["action_type"],
+    group: ["action"],
     order: [[sequelize.fn("COUNT", sequelize.col("id")), "DESC"]],
   });
 
@@ -151,7 +156,7 @@ AuditLog.getSystemStats = async function () {
 
 AuditLog.getRecentActivity = function (limit = 20) {
   return this.findAll({
-    order: [["timestamp", "DESC"]],
+    order: [["created_at", "DESC"]],
     limit: limit,
     include: [
       {
@@ -166,7 +171,7 @@ AuditLog.getRecentActivity = function (limit = 20) {
 // Associations
 AuditLog.associate = (models) => {
   AuditLog.belongsTo(models.User, {
-    foreignKey: "action_by",
+    foreignKey: "created_by",
     as: "user",
   });
 };

@@ -1,6 +1,5 @@
 const User = require("./User");
 const Leave = require("./Leave");
-const LeaveBalance = require("./LeaveBalance");
 const AuditLog = require("./AuditLog");
 const SystemConfig = require("./SystemConfig");
 
@@ -8,7 +7,6 @@ const SystemConfig = require("./SystemConfig");
 const models = {
   User,
   Leave,
-  LeaveBalance,
   AuditLog,
   SystemConfig,
 };
@@ -23,7 +21,6 @@ Object.values(models).forEach((model) => {
 module.exports = {
   User,
   Leave,
-  LeaveBalance,
   AuditLog,
   SystemConfig,
   sequelize: require("../config/database").sequelize,

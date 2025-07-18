@@ -10,9 +10,17 @@ const Leave = sequelize.define(
       primaryKey: true,
       autoIncrement: true,
     },
-    user_id: {
+    created_by: {
       type: DataTypes.INTEGER,
       allowNull: false,
+      references: {
+        model: "Users",
+        key: "id",
+      },
+    },
+    manager_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
       references: {
         model: "Users",
         key: "id",
@@ -109,8 +117,13 @@ Leave.findPendingLeaves = function () {
     include: [
       {
         model: require("./User"),
-        as: "user",
-        attributes: ["id", "name", "email", "role", "manager_id"],
+        as: "creator",
+        attributes: ["id", "name", "email", "role"],
+      },
+      {
+        model: require("./User"),
+        as: "manager",
+        attributes: ["id", "name", "email", "role"],
       },
     ],
     order: [["created_at", "DESC"]],
@@ -119,11 +132,16 @@ Leave.findPendingLeaves = function () {
 
 Leave.findByUser = function (userId) {
   return this.findAll({
-    where: { user_id: userId },
+    where: { created_by: userId },
     include: [
       {
         model: require("./User"),
-        as: "user",
+        as: "creator",
+        attributes: ["id", "name", "email", "role"],
+      },
+      {
+        model: require("./User"),
+        as: "manager",
         attributes: ["id", "name", "email", "role"],
       },
     ],
@@ -133,11 +151,16 @@ Leave.findByUser = function (userId) {
 
 Leave.findByManager = function (managerId) {
   return this.findAll({
+    where: { manager_id: managerId },
     include: [
       {
         model: require("./User"),
-        as: "user",
-        where: { manager_id: managerId },
+        as: "creator",
+        attributes: ["id", "name", "email", "role"],
+      },
+      {
+        model: require("./User"),
+        as: "manager",
         attributes: ["id", "name", "email", "role"],
       },
     ],
@@ -152,7 +175,7 @@ Leave.findOverlappingLeaves = function (
   excludeId = null
 ) {
   const whereClause = {
-    user_id: userId,
+    created_by: userId,
     status: [LEAVE_STATUS.PENDING, LEAVE_STATUS.APPROVED],
     [sequelize.Op.or]: [
       {
@@ -183,23 +206,16 @@ Leave.findOverlappingLeaves = function (
 
 // Associations
 Leave.associate = (models) => {
+  // Association with User who created the leave
   Leave.belongsTo(models.User, {
-    foreignKey: "user_id",
-    as: "user",
+    foreignKey: "created_by",
+    as: "creator",
   });
 
-  Leave.hasMany(models.AuditLog, {
-    foreignKey: "action_target",
-    sourceKey: "id",
-    as: "auditLogs",
-    scope: {
-      action_type: [
-        "leave_applied",
-        "leave_approved",
-        "leave_rejected",
-        "leave_cancelled",
-      ],
-    },
+  // Association with User who manages the leave
+  Leave.belongsTo(models.User, {
+    foreignKey: "manager_id",
+    as: "manager",
   });
 };
 

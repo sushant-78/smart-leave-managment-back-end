@@ -114,21 +114,21 @@ User.associate = (models) => {
     foreignKey: "manager_id",
   });
 
-  // Leave associations
+  // Leave associations - leaves created by this user
   User.hasMany(models.Leave, {
-    foreignKey: "user_id",
-    as: "leaves",
+    foreignKey: "created_by",
+    as: "createdLeaves",
   });
 
-  // LeaveBalance associations
-  User.hasMany(models.LeaveBalance, {
-    foreignKey: "user_id",
-    as: "leaveBalances",
+  // Leave associations - leaves managed by this user
+  User.hasMany(models.Leave, {
+    foreignKey: "manager_id",
+    as: "managedLeaves",
   });
 
   // AuditLog associations
   User.hasMany(models.AuditLog, {
-    foreignKey: "action_by",
+    foreignKey: "created_by",
     as: "auditLogs",
   });
 };

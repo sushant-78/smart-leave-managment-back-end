@@ -68,6 +68,44 @@ const validateUserCreation = (req, res, next) => {
   next();
 };
 
+// User update validation (PATCH - all fields optional)
+const validateUserUpdate = (req, res, next) => {
+  const schema = Joi.object({
+    name: Joi.string().min(2).max(255).optional().messages({
+      "string.min": "Name must be at least 2 characters long",
+      "string.max": "Name cannot exceed 255 characters",
+    }),
+    email: Joi.string().email().optional().messages({
+      "string.email": "Please provide a valid email address",
+    }),
+    role: Joi.string().valid("employee", "manager").optional().messages({
+      "any.only": "Role must be employee or manager",
+    }),
+    manager_id: Joi.number()
+      .integer()
+      .positive()
+      .allow(null)
+      .optional()
+      .messages({
+        "number.base": "Manager ID must be a number",
+        "number.integer": "Manager ID must be an integer",
+        "number.positive": "Manager ID must be positive",
+      }),
+  });
+
+  const { error } = schema.validate(req.body);
+
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      message: "Validation error",
+      errors: error.details.map((detail) => detail.message),
+    });
+  }
+
+  next();
+};
+
 // Leave application validation
 const validateLeaveApplication = (req, res, next) => {
   const schema = Joi.object({
@@ -178,6 +216,7 @@ const validateSystemConfig = (req, res, next) => {
 module.exports = {
   validateLogin,
   validateUserCreation,
+  validateUserUpdate,
   validateLeaveApplication,
   validateLeaveApproval,
   validateSystemConfig,

@@ -1,11 +1,4 @@
-const {
-  User,
-  Leave,
-  LeaveBalance,
-  SystemConfig,
-  AuditLog,
-  sequelize,
-} = require("../models");
+const { User, Leave, SystemConfig, AuditLog, sequelize } = require("../models");
 const { validateSystemConfig } = require("../middleware/validation");
 const { ACTION_TYPES, LEAVE_STATUS } = require("../config/auth");
 
@@ -103,20 +96,22 @@ const setSystemConfig = async (req, res) => {
     }
 
     // Create system config
-    const config = await SystemConfig.createYearlyConfig(year, {
-      working_days_per_week,
-      holidays,
-      leave_types,
-    });
+    const config = await SystemConfig.createYearlyConfig(
+      year,
+      {
+        working_days_per_week,
+        holidays,
+        leave_types,
+      },
+      req.user.id
+    );
 
     // Log configuration update
     await AuditLog.logAction(
       req.user.id,
-      ACTION_TYPES.CONFIG_UPDATED,
+      "system_config",
       year.toString(),
-      {
-        config_details: { working_days_per_week, holidays, leave_types },
-      }
+      "create"
     );
 
     // Email simulation
@@ -138,99 +133,127 @@ const setSystemConfig = async (req, res) => {
   }
 };
 
-// Lock system configuration
-const lockSystemConfig = async (req, res) => {
+// Update holidays for a specific year
+const updateHolidays = async (req, res) => {
   try {
     const { year } = req.params;
+    const { holidays } = req.body;
 
-    const config = await SystemConfig.getConfigByYear(parseInt(year));
-    if (!config) {
-      return res.status(404).json({
-        success: false,
-        message: `Configuration for year ${year} not found`,
-      });
-    }
+    // Validate holidays
+    SystemConfig.validateHolidays(holidays);
 
-    if (config.is_locked) {
-      return res.status(400).json({
-        success: false,
-        message: `Configuration for year ${year} is already locked`,
-      });
-    }
-
-    // Lock configuration
-    await config.update({ is_locked: true });
-
-    // Log configuration lock
-    await AuditLog.logAction(
-      req.user.id,
-      ACTION_TYPES.CONFIG_UPDATED,
-      year.toString(),
+    // Upsert configuration with holidays
+    const config = await SystemConfig.upsertConfig(
+      parseInt(year),
       {
-        action: "locked_configuration",
-      }
+        holidays,
+      },
+      req.user.id
     );
 
-    // Email simulation
-    console.log(
-      `Email to admin: System configuration for year ${year} has been locked`
+    // Log holiday update
+    await AuditLog.logAction(
+      req.user.id,
+      "system_config",
+      year.toString(),
+      "update"
     );
 
     res.json({
       success: true,
-      message: "System configuration locked successfully",
+      message: "Holidays updated successfully",
       data: { config },
     });
   } catch (error) {
-    console.error("Lock system config error:", error);
+    console.error("Update holidays error:", error);
     res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: error.message || "Internal server error",
     });
   }
 };
 
-// Reset leave balances for a year
-const resetLeaveBalances = async (req, res) => {
+// Update working days for a specific year
+const updateWorkingDays = async (req, res) => {
   try {
     const { year } = req.params;
+    const { working_days_per_week } = req.body;
 
-    // Get system config for the year
-    const config = await SystemConfig.getConfigByYear(parseInt(year));
-    if (!config) {
-      return res.status(404).json({
+    // Validate working days
+    if (![4, 5, 6].includes(working_days_per_week)) {
+      return res.status(400).json({
         success: false,
-        message: `Configuration for year ${year} not found`,
+        message: "Working days per week must be 4, 5, or 6",
       });
     }
 
-    // Reset balances for all users
-    await LeaveBalance.resetBalancesForYear(parseInt(year), config.leave_types);
-
-    // Log balance reset
-    await AuditLog.logAction(
-      req.user.id,
-      ACTION_TYPES.BALANCE_RESET,
-      year.toString(),
+    // Upsert configuration with working days
+    const config = await SystemConfig.upsertConfig(
+      parseInt(year),
       {
-        reset_details: { year, leave_types: config.leave_types },
-      }
+        working_days_per_week,
+      },
+      req.user.id
     );
 
-    // Email simulation
-    console.log(
-      `Email to all users: Leave balances for year ${year} have been reset`
+    // Log working days update
+    await AuditLog.logAction(
+      req.user.id,
+      "system_config",
+      year.toString(),
+      "update"
     );
 
     res.json({
       success: true,
-      message: "Leave balances reset successfully",
+      message: "Working days updated successfully",
+      data: { config },
     });
   } catch (error) {
-    console.error("Reset leave balances error:", error);
+    console.error("Update working days error:", error);
     res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: error.message || "Internal server error",
+    });
+  }
+};
+
+// Update leave types for a specific year
+const updateLeaveTypes = async (req, res) => {
+  try {
+    const { year } = req.params;
+    const { leave_types } = req.body;
+
+    // Validate leave types
+    SystemConfig.validateLeaveTypes(leave_types);
+
+    // Upsert configuration with leave types
+    const config = await SystemConfig.upsertConfig(
+      parseInt(year),
+      {
+        leave_types,
+      },
+      req.user.id
+    );
+
+    // Log leave types update
+    await AuditLog.logAction(
+      req.user.id,
+      "system_config",
+      year.toString(),
+      "update"
+    );
+
+    res.json({
+      success: true,
+      message: "Leave types updated successfully",
+      data: { config },
+    });
+  } catch (error) {
+    console.error("Update leave types error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
     });
   }
 };
@@ -283,9 +306,12 @@ const getSystemConfig = async (req, res) => {
     const config = await SystemConfig.getConfigByYear(parseInt(year));
 
     if (!config) {
-      return res.status(404).json({
-        success: false,
-        message: `Configuration for year ${year} not found`,
+      return res.status(200).json({
+        success: true,
+        data: {
+          config: null,
+          message: `No configuration found for year ${year}. You can create one.`,
+        },
       });
     }
 
@@ -306,6 +332,17 @@ const getSystemConfig = async (req, res) => {
 const getCurrentSystemConfig = async (req, res) => {
   try {
     const config = await SystemConfig.getCurrentYearConfig();
+    const currentYear = new Date().getFullYear();
+
+    if (!config) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          config: null,
+          message: `No configuration found for current year ${currentYear}. You can create one.`,
+        },
+      });
+    }
 
     res.json({
       success: true,
@@ -323,8 +360,9 @@ const getCurrentSystemConfig = async (req, res) => {
 module.exports = {
   getDashboardStats,
   setSystemConfig,
-  lockSystemConfig,
-  resetLeaveBalances,
+  updateHolidays,
+  updateWorkingDays,
+  updateLeaveTypes,
   getPendingLeavesByManager,
   getSystemConfig,
   getCurrentSystemConfig,

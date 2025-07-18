@@ -5,8 +5,9 @@ const { validateSystemConfig } = require("../middleware/validation");
 const {
   getDashboardStats,
   setSystemConfig,
-  lockSystemConfig,
-  resetLeaveBalances,
+  updateHolidays,
+  updateWorkingDays,
+  updateLeaveTypes,
   getPendingLeavesByManager,
   getSystemConfig,
   getCurrentSystemConfig,
@@ -30,11 +31,14 @@ router.get("/config/:year", getSystemConfig);
 // POST /api/admin/config - Set yearly system configuration
 router.post("/config", validateSystemConfig, setSystemConfig);
 
-// PUT /api/admin/config/:year/lock - Lock system configuration
-router.put("/config/:year/lock", lockSystemConfig);
+// POST /api/admin/config/:year/holidays - Update holidays for a year
+router.post("/config/:year/holidays", updateHolidays);
 
-// POST /api/admin/reset-balances/:year - Reset leave balances for a year
-router.post("/reset-balances/:year", resetLeaveBalances);
+// POST /api/admin/config/:year/working-days - Update working days for a year
+router.post("/config/:year/working-days", updateWorkingDays);
+
+// POST /api/admin/config/:year/leave-types - Update leave types for a year
+router.post("/config/:year/leave-types", updateLeaveTypes);
 
 // GET /api/admin/pending-leaves/:manager_id - Get pending leaves by manager
 router.get("/pending-leaves/:manager_id", getPendingLeavesByManager);
