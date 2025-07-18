@@ -4,66 +4,98 @@ const {
   validateLeaveApproval,
 } = require("../middleware/validation");
 const { LEAVE_STATUS, ACTION_TYPES } = require("../config/auth");
+const { Op } = require("sequelize");
 
-// Get all leaves (filtered by role)
 const getAllLeaves = async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 10,
-      status = "",
-      type = "",
-      user_id = "",
-    } = req.query;
-    const offset = (page - 1) * limit;
+    const { page, limit, year } = req.query;
+    const offset = page ? (page - 1) * limit : 0;
 
     let whereClause = {};
-    if (status) whereClause.status = status;
-    if (type) whereClause.type = type;
-    if (user_id) whereClause.created_by = user_id;
 
-    // Role-based filtering
-    if (req.user.role === "employee") {
-      whereClause.created_by = req.user.id;
-    } else if (req.user.role === "manager") {
-      // Get leaves managed by this manager
-      whereClause.manager_id = req.user.id;
+    if (year) {
+      whereClause.from_date = {
+        [Op.gte]: `${year}-01-01`,
+        [Op.lte]: `${year}-12-31`,
+      };
     }
-    // Admin can see all leaves
 
-    const { count, rows: leaves } = await Leave.findAndCountAll({
+    whereClause.created_by = req.user.id;
+
+    const queryOptions = {
       where: whereClause,
       include: [
         {
           model: User,
           as: "creator",
-          attributes: ["id", "name", "email", "role"],
+          attributes: [
+            "id",
+            "name",
+            "email",
+            "role",
+            "manager_id",
+            "created_at",
+            "updated_at",
+          ],
+          include: [
+            {
+              model: User,
+              as: "manager",
+              attributes: [
+                "id",
+                "name",
+                "email",
+                "role",
+                "manager_id",
+                "created_at",
+                "updated_at",
+              ],
+            },
+          ],
         },
         {
           model: User,
           as: "manager",
-          attributes: ["id", "name", "email", "role"],
+          attributes: [
+            "id",
+            "name",
+            "email",
+            "role",
+            "manager_id",
+            "created_at",
+            "updated_at",
+          ],
         },
       ],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
       order: [["created_at", "DESC"]],
-    });
+    };
 
-    res.json({
+    if (page && limit) {
+      queryOptions.limit = parseInt(limit);
+      queryOptions.offset = parseInt(offset);
+    }
+
+    const { count, rows: leaves } = await Leave.findAndCountAll(queryOptions);
+
+    const response = {
       success: true,
+      message: "Leaves retrieved successfully",
       data: {
-        leaves,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: count,
-          pages: Math.ceil(count / limit),
-        },
+        leaves: leaves,
       },
-    });
+    };
+
+    if (page && limit) {
+      response.data.pagination = {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: count,
+        pages: Math.ceil(count / parseInt(limit)),
+      };
+    }
+
+    res.json(response);
   } catch (error) {
-    console.error("Get all leaves error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -71,7 +103,6 @@ const getAllLeaves = async (req, res) => {
   }
 };
 
-// Get leave by ID
 const getLeaveById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -98,7 +129,6 @@ const getLeaveById = async (req, res) => {
       });
     }
 
-    // Check access permissions
     if (req.user.role === "employee" && leave.created_by !== req.user.id) {
       return res.status(403).json({
         success: false,
@@ -118,7 +148,6 @@ const getLeaveById = async (req, res) => {
       data: { leave },
     });
   } catch (error) {
-    console.error("Get leave by ID error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -126,24 +155,21 @@ const getLeaveById = async (req, res) => {
   }
 };
 
-// Apply for leave
 const applyLeave = async (req, res) => {
   try {
     const { from_date, to_date, type, reason } = req.body;
     const userId = req.user.id;
 
-    // Get current year config
-    const currentYear = new Date().getFullYear();
-    const yearConfig = await SystemConfig.getCurrentYearConfig();
+    const leaveYear = new Date(from_date).getFullYear();
+    const yearConfig = await SystemConfig.getConfigByYear(leaveYear);
 
     if (!yearConfig) {
       return res.status(400).json({
         success: false,
-        message: "System configuration not set for current year",
+        message: `System configuration not set for year ${leaveYear}`,
       });
     }
 
-    // Check for overlapping leaves
     const overlappingLeaves = await Leave.findOverlappingLeaves(
       userId,
       from_date,
@@ -156,8 +182,7 @@ const applyLeave = async (req, res) => {
       });
     }
 
-    // Calculate working days
-    const workingDays = config.getWorkingDaysBetween(from_date, to_date);
+    const workingDays = yearConfig.getWorkingDaysBetween(from_date, to_date);
     if (workingDays === 0) {
       return res.status(400).json({
         success: false,
@@ -165,22 +190,49 @@ const applyLeave = async (req, res) => {
       });
     }
 
-    // Check leave balance from system config
-    const availableBalance = yearConfig.leave_types[type] || 0;
-    if (availableBalance < workingDays) {
+    const approvedLeaves = await Leave.findAll({
+      where: {
+        created_by: userId,
+        type: type,
+        status: "approved",
+      },
+      attributes: ["from_date", "to_date"],
+    });
+
+    let usedLeaves = 0;
+    for (const leave of approvedLeaves) {
+      usedLeaves += yearConfig.getWorkingDaysBetween(
+        leave.from_date,
+        leave.to_date
+      );
+    }
+
+    const totalBalance = yearConfig.leave_types[type] || 0;
+    const remainingBalance = totalBalance - usedLeaves;
+
+    if (remainingBalance < workingDays) {
       return res.status(400).json({
         success: false,
-        message: `Insufficient ${type} leave balance. Available: ${availableBalance}, Required: ${workingDays}`,
+        message: `Insufficient ${type} leave balance. Available: ${remainingBalance}, Required: ${workingDays}`,
       });
     }
 
-    // Get user's manager
     const user = await User.findByPk(userId);
 
-    // Create leave request
+    let managerId = null;
+    if (user.role === "manager") {
+      const adminUser = await User.findOne({
+        where: { role: "admin" },
+        attributes: ["id"],
+      });
+      managerId = adminUser ? adminUser.id : null;
+    } else {
+      managerId = user.manager_id;
+    }
+
     const leave = await Leave.create({
       created_by: userId,
-      manager_id: user.manager_id,
+      manager_id: managerId,
       from_date,
       to_date,
       type,
@@ -188,31 +240,84 @@ const applyLeave = async (req, res) => {
       status: LEAVE_STATUS.PENDING,
     });
 
-    // Log leave application
     await AuditLog.logAction(userId, "leave", leave.id.toString(), "create");
 
-    // Email simulation - notify manager
-    const manager = user.manager_id
-      ? await User.findByPk(user.manager_id)
-      : null;
+    const manager = managerId ? await User.findByPk(managerId) : null;
 
     if (manager) {
-      console.log(
-        `Email to ${manager.email}: Leave request from ${user.name} (${from_date} to ${to_date})`
-      );
     } else {
-      console.log(
-        `Email to admin: Leave request from ${user.name} (${from_date} to ${to_date}) - No manager assigned`
-      );
     }
+
+    const createdLeave = await Leave.findByPk(leave.id, {
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: [
+            "id",
+            "name",
+            "email",
+            "role",
+            "manager_id",
+            "created_at",
+            "updated_at",
+          ],
+          include: [
+            {
+              model: User,
+              as: "manager",
+              attributes: [
+                "id",
+                "name",
+                "email",
+                "role",
+                "manager_id",
+                "created_at",
+                "updated_at",
+              ],
+            },
+          ],
+        },
+        {
+          model: User,
+          as: "manager",
+          attributes: [
+            "id",
+            "name",
+            "email",
+            "role",
+            "manager_id",
+            "created_at",
+            "updated_at",
+          ],
+        },
+      ],
+    });
+
+    const transformedLeave = {
+      id: createdLeave.id,
+      created_by: createdLeave.created_by,
+      manager_id: createdLeave.manager_id,
+      from_date: createdLeave.from_date,
+      to_date: createdLeave.to_date,
+      type: createdLeave.type,
+      reason: createdLeave.reason,
+      status: createdLeave.status,
+      manager_comment: createdLeave.manager_comment,
+      created_at: createdLeave.created_at,
+      updated_at: createdLeave.updated_at,
+      user: createdLeave.creator,
+      manager: createdLeave.manager,
+    };
 
     res.status(201).json({
       success: true,
       message: "Leave application submitted successfully",
-      data: { leave },
+      data: {
+        leave: transformedLeave,
+      },
     });
   } catch (error) {
-    console.error("Apply leave error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -220,7 +325,6 @@ const applyLeave = async (req, res) => {
   }
 };
 
-// Cancel leave (only pending leaves)
 const cancelLeave = async (req, res) => {
   try {
     const { id } = req.params;
@@ -234,7 +338,6 @@ const cancelLeave = async (req, res) => {
       });
     }
 
-    // Check ownership
     if (leave.created_by !== userId) {
       return res.status(403).json({
         success: false,
@@ -242,7 +345,6 @@ const cancelLeave = async (req, res) => {
       });
     }
 
-    // Check if leave can be cancelled
     if (!leave.canBeCancelled()) {
       return res.status(400).json({
         success: false,
@@ -250,24 +352,17 @@ const cancelLeave = async (req, res) => {
       });
     }
 
-    // Delete leave
     await leave.destroy();
 
-    // Log leave cancellation
     await AuditLog.logAction(userId, "leave", leave.id.toString(), "delete");
 
-    // Email simulation
     const user = await User.findByPk(userId);
-    console.log(
-      `Email to ${user.email}: Your leave request has been cancelled`
-    );
 
     res.json({
       success: true,
       message: "Leave cancelled successfully",
     });
   } catch (error) {
-    console.error("Cancel leave error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -275,7 +370,6 @@ const cancelLeave = async (req, res) => {
   }
 };
 
-// Approve/reject leave (Manager/Admin only)
 const approveLeave = async (req, res) => {
   try {
     const { id } = req.params;
@@ -303,7 +397,6 @@ const approveLeave = async (req, res) => {
       });
     }
 
-    // Check if leave can be approved
     if (!leave.canBeApproved()) {
       return res.status(400).json({
         success: false,
@@ -311,7 +404,6 @@ const approveLeave = async (req, res) => {
       });
     }
 
-    // Check permissions
     if (req.user.role === "manager") {
       if (leave.manager_id !== req.user.id) {
         return res.status(403).json({
@@ -321,7 +413,6 @@ const approveLeave = async (req, res) => {
       }
     }
 
-    // Calculate working days for balance deduction
     const currentYear = new Date().getFullYear();
     const config = await SystemConfig.getCurrentYearConfig();
     const workingDays = config.getWorkingDaysBetween(
@@ -329,16 +420,11 @@ const approveLeave = async (req, res) => {
       leave.to_date
     );
 
-    // Update leave status
     await leave.update({
       status,
       manager_comment: manager_comment || null,
     });
 
-    // Note: Balance deduction is now handled by system config
-    // No individual user balance tracking needed
-
-    // Log approval/rejection
     const actionType = status === LEAVE_STATUS.APPROVED ? "approve" : "reject";
     await AuditLog.logAction(
       req.user.id,
@@ -347,18 +433,12 @@ const approveLeave = async (req, res) => {
       actionType
     );
 
-    // Email simulation
-    console.log(
-      `Email to ${leave.creator.email}: Your leave from ${leave.from_date} to ${leave.to_date} has been ${status}`
-    );
-
     res.json({
       success: true,
       message: `Leave ${status} successfully`,
       data: { leave },
     });
   } catch (error) {
-    console.error("Approve leave error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -366,7 +446,6 @@ const approveLeave = async (req, res) => {
   }
 };
 
-// Get leave balance from system config
 const getLeaveBalance = async (req, res) => {
   try {
     const currentYear = new Date().getFullYear();
@@ -387,7 +466,6 @@ const getLeaveBalance = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get leave balance error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -395,7 +473,6 @@ const getLeaveBalance = async (req, res) => {
   }
 };
 
-// Get team leaves (Manager only)
 const getTeamLeaves = async (req, res) => {
   try {
     const managerId = req.user.id;
@@ -407,7 +484,247 @@ const getTeamLeaves = async (req, res) => {
       data: { leaves },
     });
   } catch (error) {
-    console.error("Get team leaves error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+const getManagerTeamLeaves = async (req, res) => {
+  try {
+    const managerId = req.user.id;
+    const currentYear = new Date().getFullYear();
+
+    const leaves = await Leave.findAll({
+      where: {
+        manager_id: managerId,
+        from_date: {
+          [Op.gte]: `${currentYear}-01-01`,
+          [Op.lte]: `${currentYear}-12-31`,
+        },
+      },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "name", "email", "role"],
+        },
+      ],
+      order: [["created_at", "DESC"]],
+    });
+
+    const formattedLeaves = leaves.map((leave) => ({
+      id: leave.id,
+      created_by: leave.created_by,
+      manager_id: leave.manager_id,
+      from_date: leave.from_date,
+      to_date: leave.to_date,
+      type: leave.type,
+      reason: leave.reason,
+      status: leave.status,
+      manager_comment: leave.manager_comment,
+      created_at: leave.created_at,
+      updated_at: leave.updated_at,
+      user: {
+        id: leave.creator.id,
+        name: leave.creator.name,
+        email: leave.creator.email,
+        role: leave.creator.role,
+      },
+    }));
+
+    res.json({
+      success: true,
+      message: "Team leaves retrieved successfully",
+      data: {
+        leaves: formattedLeaves,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+const getAllLeavesAdmin = async (req, res) => {
+  try {
+    const { page, limit, year } = req.query;
+    const offset = page ? (page - 1) * limit : 0;
+
+    let whereClause = {};
+
+    if (year) {
+      whereClause.from_date = {
+        [Op.gte]: `${year}-01-01`,
+        [Op.lte]: `${year}-12-31`,
+      };
+    }
+
+    const queryOptions = {
+      where: whereClause,
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: [
+            "id",
+            "name",
+            "email",
+            "role",
+            "manager_id",
+            "created_at",
+            "updated_at",
+          ],
+          include: [
+            {
+              model: User,
+              as: "manager",
+              attributes: [
+                "id",
+                "name",
+                "email",
+                "role",
+                "manager_id",
+                "created_at",
+                "updated_at",
+              ],
+            },
+          ],
+        },
+        {
+          model: User,
+          as: "manager",
+          attributes: [
+            "id",
+            "name",
+            "email",
+            "role",
+            "manager_id",
+            "created_at",
+            "updated_at",
+          ],
+        },
+      ],
+      order: [["created_at", "DESC"]],
+    };
+
+    if (page && limit) {
+      queryOptions.limit = parseInt(limit);
+      queryOptions.offset = parseInt(offset);
+    }
+
+    const { count, rows: leaves } = await Leave.findAndCountAll(queryOptions);
+
+    const formattedLeaves = leaves.map((leave) => ({
+      id: leave.id,
+      created_by: leave.created_by,
+      manager_id: leave.manager_id,
+      from_date: leave.from_date,
+      to_date: leave.to_date,
+      type: leave.type,
+      reason: leave.reason,
+      status: leave.status,
+      manager_comment: leave.manager_comment,
+      created_at: leave.created_at,
+      updated_at: leave.updated_at,
+      employee: {
+        id: leave.creator.id,
+        name: leave.creator.name,
+        email: leave.creator.email,
+        role: leave.creator.role,
+      },
+      manager: leave.manager
+        ? {
+            id: leave.manager.id,
+            name: leave.manager.name,
+            email: leave.manager.email,
+            role: leave.manager.role,
+          }
+        : null,
+    }));
+
+    const response = {
+      success: true,
+      message: "All leaves retrieved successfully",
+      data: {
+        leaves: formattedLeaves,
+      },
+    };
+
+    if (page && limit) {
+      response.data.pagination = {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: count,
+        pages: Math.ceil(count / parseInt(limit)),
+      };
+    }
+
+    res.json(response);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+const getAdminManagerTeamLeaves = async (req, res) => {
+  try {
+    const { year } = req.query;
+    const currentYear = year || new Date().getFullYear();
+
+    const leaves = await Leave.findAll({
+      where: {
+        from_date: {
+          [Op.gte]: `${currentYear}-01-01`,
+          [Op.lte]: `${currentYear}-12-31`,
+        },
+      },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "name", "email", "role"],
+          where: {
+            role: "manager",
+          },
+        },
+      ],
+      order: [["created_at", "DESC"]],
+    });
+
+    const formattedLeaves = leaves.map((leave) => ({
+      id: leave.id,
+      created_by: leave.created_by,
+      manager_id: leave.manager_id,
+      from_date: leave.from_date,
+      to_date: leave.to_date,
+      type: leave.type,
+      reason: leave.reason,
+      status: leave.status,
+      manager_comment: leave.manager_comment,
+      created_at: leave.created_at,
+      updated_at: leave.updated_at,
+      user: {
+        id: leave.creator.id,
+        name: leave.creator.name,
+        email: leave.creator.email,
+        role: leave.creator.role,
+      },
+    }));
+
+    res.json({
+      success: true,
+      message: "All manager leaves retrieved successfully",
+      data: {
+        leaves: formattedLeaves,
+      },
+    });
+  } catch (error) {
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -423,4 +740,7 @@ module.exports = {
   approveLeave,
   getLeaveBalance,
   getTeamLeaves,
+  getManagerTeamLeaves,
+  getAllLeavesAdmin,
+  getAdminManagerTeamLeaves,
 };

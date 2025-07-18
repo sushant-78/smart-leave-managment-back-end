@@ -30,20 +30,15 @@ const LEAVE_TYPES = {
 };
 
 const ACTION_TYPES = {
-  // Leave actions
   LEAVE_APPLIED: "leave_applied",
   LEAVE_APPROVED: "leave_approved",
   LEAVE_REJECTED: "leave_rejected",
   LEAVE_CANCELLED: "leave_cancelled",
-
-  // User actions
   USER_CREATED: "user_created",
   USER_UPDATED: "user_updated",
   USER_DELETED: "user_deleted",
   ROLE_CHANGED: "role_changed",
   MANAGER_ASSIGNED: "manager_assigned",
-
-  // System actions
   BALANCE_RESET: "balance_reset",
   CONFIG_UPDATED: "config_updated",
   HOLIDAYS_SET: "holidays_set",

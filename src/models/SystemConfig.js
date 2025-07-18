@@ -62,7 +62,6 @@ const SystemConfig = sequelize.define(
   }
 );
 
-// Instance methods
 SystemConfig.prototype.isHoliday = function (date) {
   const dateStr = date.toISOString().split("T")[0];
   return this.holidays.hasOwnProperty(dateStr);
@@ -73,11 +72,11 @@ SystemConfig.prototype.isWeekend = function (date) {
   const workingDays = this.working_days_per_week;
 
   if (workingDays === 5) {
-    return day === 0 || day === 6; // Sunday or Saturday
+    return day === 0 || day === 6;
   } else if (workingDays === 4) {
-    return day === 0 || day === 6 || day === 5; // Sunday, Saturday, Friday
+    return day === 0 || day === 6 || day === 5;
   } else if (workingDays === 6) {
-    return day === 0; // Only Sunday
+    return day === 0;
   }
 
   return false;
@@ -85,9 +84,15 @@ SystemConfig.prototype.isWeekend = function (date) {
 
 SystemConfig.prototype.getWorkingDaysBetween = function (startDate, endDate) {
   let workingDays = 0;
-  const currentDate = new Date(startDate);
+  const start = new Date(startDate);
+  const end = new Date(endDate);
 
-  while (currentDate <= endDate) {
+  start.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+
+  const currentDate = new Date(start);
+
+  while (currentDate <= end) {
     if (!this.isHoliday(currentDate) && !this.isWeekend(currentDate)) {
       workingDays++;
     }
@@ -97,7 +102,6 @@ SystemConfig.prototype.getWorkingDaysBetween = function (startDate, endDate) {
   return workingDays;
 };
 
-// Class methods
 SystemConfig.getCurrentYearConfig = function () {
   const currentYear = new Date().getFullYear();
   return this.findOne({
@@ -155,7 +159,6 @@ SystemConfig.upsertConfig = async function (year, updates, createdBy) {
   const config = await this.findOne({ where: { year } });
 
   if (config) {
-    // Update existing config - merge with existing data
     const mergedUpdates = {
       working_days_per_week:
         updates.working_days_per_week !== undefined
@@ -170,7 +173,6 @@ SystemConfig.upsertConfig = async function (year, updates, createdBy) {
     };
     return config.update(mergedUpdates);
   } else {
-    // Create new config with only the provided fields
     const newConfig = {
       year,
       created_by: createdBy || null,
@@ -203,7 +205,6 @@ SystemConfig.validateHolidays = function (holidays) {
       throw new Error(`Invalid title for date ${date}`);
     }
 
-    // Check if it's a Sunday
     if (dateObj.getDay() === 0) {
       throw new Error(`Cannot set Sunday (${date}) as a holiday`);
     }
@@ -226,9 +227,7 @@ SystemConfig.validateLeaveTypes = function (leaveTypes) {
   return true;
 };
 
-// Associations
 SystemConfig.associate = (models) => {
-  // Association with User who created the config
   SystemConfig.belongsTo(models.User, {
     foreignKey: "created_by",
     as: "creator",

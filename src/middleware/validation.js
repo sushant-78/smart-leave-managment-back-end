@@ -1,6 +1,5 @@
 const Joi = require("joi");
 
-// Login validation
 const validateLogin = (req, res, next) => {
   const schema = Joi.object({
     email: Joi.string().email().required().messages({
@@ -26,7 +25,6 @@ const validateLogin = (req, res, next) => {
   next();
 };
 
-// User creation validation
 const validateUserCreation = (req, res, next) => {
   const schema = Joi.object({
     name: Joi.string().min(2).max(255).required().messages({
@@ -68,7 +66,6 @@ const validateUserCreation = (req, res, next) => {
   next();
 };
 
-// User update validation (PATCH - all fields optional)
 const validateUserUpdate = (req, res, next) => {
   const schema = Joi.object({
     name: Joi.string().min(2).max(255).optional().messages({
@@ -106,7 +103,6 @@ const validateUserUpdate = (req, res, next) => {
   next();
 };
 
-// Leave application validation
 const validateLeaveApplication = (req, res, next) => {
   const schema = Joi.object({
     from_date: Joi.date().iso().required().messages({
@@ -122,8 +118,8 @@ const validateLeaveApplication = (req, res, next) => {
       "any.only": "Leave type must be casual, sick, or earned",
       "any.required": "Leave type is required",
     }),
-    reason: Joi.string().min(10).max(1000).required().messages({
-      "string.min": "Reason must be at least 10 characters long",
+    reason: Joi.string().min(1).max(1000).required().messages({
+      "string.min": "Reason cannot be empty",
       "string.max": "Reason cannot exceed 1000 characters",
       "any.required": "Reason is required",
     }),
@@ -142,7 +138,6 @@ const validateLeaveApplication = (req, res, next) => {
   next();
 };
 
-// Leave approval validation
 const validateLeaveApproval = (req, res, next) => {
   const schema = Joi.object({
     status: Joi.string().valid("approved", "rejected").required().messages({
@@ -167,7 +162,6 @@ const validateLeaveApproval = (req, res, next) => {
   next();
 };
 
-// System configuration validation
 const validateSystemConfig = (req, res, next) => {
   const schema = Joi.object({
     year: Joi.number().integer().min(2020).max(2030).required().messages({

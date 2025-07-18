@@ -3,12 +3,10 @@ const { generateToken } = require("../middleware/auth");
 const { validateLogin } = require("../middleware/validation");
 const { ACTION_TYPES } = require("../config/auth");
 
-// Login user
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user by email
     const user = await User.findByEmail(email);
     if (!user) {
       return res.status(401).json({
@@ -17,7 +15,6 @@ const login = async (req, res) => {
       });
     }
 
-    // Check password
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({
@@ -26,14 +23,9 @@ const login = async (req, res) => {
       });
     }
 
-    // Generate JWT token
     const token = generateToken(user.id);
 
-    // Log login action
     await AuditLog.logAction(user.id, "auth", user.id.toString(), "login");
-
-    // Email simulation
-    console.log(`Email to ${user.email}: Welcome back ${user.name}!`);
 
     res.json({
       success: true,
@@ -45,11 +37,11 @@ const login = async (req, res) => {
           name: user.name,
           email: user.email,
           role: user.role,
+          manager_id: user.manager_id,
         },
       },
     });
   } catch (error) {
-    console.error("Login error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -57,12 +49,10 @@ const login = async (req, res) => {
   }
 };
 
-// Get current user profile
 const getMe = async (req, res) => {
   try {
     const user = req.user;
 
-    // Get user with manager info
     const userWithManager = await User.findByPk(user.id, {
       include: [
         {
@@ -80,7 +70,6 @@ const getMe = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get me error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -88,44 +77,17 @@ const getMe = async (req, res) => {
   }
 };
 
-// Logout user
 const logout = async (req, res) => {
   try {
     const user = req.user;
 
-    // Log logout action
     await AuditLog.logAction(user.id, "auth", user.id.toString(), "logout");
-
-    // Email simulation
-    console.log(`Email to ${user.email}: Goodbye ${user.name}!`);
 
     res.json({
       success: true,
       message: "Logout successful",
     });
   } catch (error) {
-    console.error("Logout error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
-  }
-};
-
-// Refresh token (optional - for future use)
-const refreshToken = async (req, res) => {
-  try {
-    const user = req.user;
-    const newToken = generateToken(user.id);
-
-    res.json({
-      success: true,
-      data: {
-        token: newToken,
-      },
-    });
-  } catch (error) {
-    console.error("Refresh token error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -137,5 +99,4 @@ module.exports = {
   login,
   getMe,
   logout,
-  refreshToken,
 };

@@ -4,7 +4,6 @@ const { User } = require("../models");
 
 const authMiddleware = async (req, res, next) => {
   try {
-    // Get token from header
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -14,12 +13,10 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const token = authHeader.substring(7);
 
-    // Verify token
     const decoded = jwt.verify(token, JWT_CONFIG.secret);
 
-    // Get user from database
     const user = await User.findByPk(decoded.userId);
 
     if (!user) {
@@ -29,7 +26,6 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    // Add user to request object
     req.user = user;
     next();
   } catch (error) {
@@ -47,7 +43,6 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    console.error("Auth middleware error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error.",

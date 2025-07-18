@@ -56,12 +56,10 @@ const AuditLog = sequelize.define(
   }
 );
 
-// Instance methods
 AuditLog.prototype.getFormattedTimestamp = function () {
   return this.created_at.toLocaleString();
 };
 
-// Class methods
 AuditLog.logAction = async function (createdBy, resource, resourceId, action) {
   try {
     return await this.create({
@@ -71,8 +69,6 @@ AuditLog.logAction = async function (createdBy, resource, resourceId, action) {
       action,
     });
   } catch (error) {
-    console.error("Error logging action:", error);
-    // Don't throw error to prevent breaking main functionality
     return null;
   }
 };
@@ -168,7 +164,6 @@ AuditLog.getRecentActivity = function (limit = 20) {
   });
 };
 
-// Associations
 AuditLog.associate = (models) => {
   AuditLog.belongsTo(models.User, {
     foreignKey: "created_by",

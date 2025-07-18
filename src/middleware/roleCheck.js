@@ -1,6 +1,5 @@
 const { ROLES } = require("../config/auth");
 
-// Middleware to check if user is admin
 const requireAdmin = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({
@@ -19,7 +18,6 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Middleware to check if user is manager
 const requireManager = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({
@@ -38,7 +36,6 @@ const requireManager = (req, res, next) => {
   next();
 };
 
-// Middleware to check if user is employee or higher
 const requireEmployee = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({
@@ -47,11 +44,9 @@ const requireEmployee = (req, res, next) => {
     });
   }
 
-  // All authenticated users are employees or higher
   next();
 };
 
-// Middleware to check if user can access their own data or is admin
 const requireOwnershipOrAdmin = (req, res, next) => {
   const targetUserId = parseInt(req.params.id) || parseInt(req.params.userId);
 
@@ -62,12 +57,10 @@ const requireOwnershipOrAdmin = (req, res, next) => {
     });
   }
 
-  // Admin can access any user's data
   if (req.user.role === ROLES.ADMIN) {
     return next();
   }
 
-  // Users can only access their own data
   if (req.user.id !== targetUserId) {
     return res.status(403).json({
       success: false,
@@ -78,7 +71,6 @@ const requireOwnershipOrAdmin = (req, res, next) => {
   next();
 };
 
-// Middleware to check if user can manage their team or is admin
 const requireTeamAccessOrAdmin = (req, res, next) => {
   const targetUserId = parseInt(req.params.id) || parseInt(req.params.userId);
 
@@ -89,14 +81,11 @@ const requireTeamAccessOrAdmin = (req, res, next) => {
     });
   }
 
-  // Admin can access any user's data
   if (req.user.role === ROLES.ADMIN) {
     return next();
   }
 
-  // Manager can only access their team members' data
   if (req.user.role === ROLES.MANAGER) {
-    // Check if target user is a reportee
     if (req.user.id === targetUserId) {
       return res.status(403).json({
         success: false,
@@ -104,7 +93,6 @@ const requireTeamAccessOrAdmin = (req, res, next) => {
       });
     }
 
-    // Check if target user is assigned to this manager
     const { User } = require("../models");
     User.findByPk(targetUserId)
       .then((targetUser) => {
@@ -117,7 +105,6 @@ const requireTeamAccessOrAdmin = (req, res, next) => {
         next();
       })
       .catch((error) => {
-        console.error("Team access check error:", error);
         return res.status(500).json({
           success: false,
           message: "Internal server error.",
@@ -126,7 +113,6 @@ const requireTeamAccessOrAdmin = (req, res, next) => {
     return;
   }
 
-  // Employees can only access their own data
   if (req.user.id !== targetUserId) {
     return res.status(403).json({
       success: false,

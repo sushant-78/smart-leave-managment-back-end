@@ -1,38 +1,44 @@
 const { User, Leave, SystemConfig, AuditLog, sequelize } = require("../models");
 const { ACTION_TYPES, ROLES } = require("../config/auth");
 
-// Get employee dashboard data
-const getEmployeeDashboard = async (req, res) => {
+const getUserDashboard = async (req, res) => {
   try {
     const userId = req.user.id;
     const currentYear = new Date().getFullYear();
 
-    // Get system configuration for current year
     const systemConfig = await SystemConfig.getConfigByYear(currentYear);
 
-    // Get leave balances
     const leaveBalances = [];
-    if (systemConfig && systemConfig.leave_types) {
-      for (const [type, total] of Object.entries(systemConfig.leave_types)) {
-        // Count used leaves for this type
-        const usedLeaves = await Leave.count({
-          where: {
-            created_by: userId,
-            type: type,
-            status: ["approved", "pending"],
-          },
-        });
+    const standardLeaveTypes = ["casual", "sick", "earned"];
 
-        leaveBalances.push({
-          type,
-          total: total || 0,
-          used: usedLeaves,
-          remaining: Math.max(0, (total || 0) - usedLeaves),
-        });
+    for (const type of standardLeaveTypes) {
+      const total = systemConfig?.leave_types?.[type] || 0;
+
+      const approvedLeaves = await Leave.findAll({
+        where: {
+          created_by: userId,
+          type: type,
+          status: "approved",
+        },
+        attributes: ["from_date", "to_date"],
+      });
+
+      let usedLeaves = 0;
+      for (const leave of approvedLeaves) {
+        usedLeaves += systemConfig.getWorkingDaysBetween(
+          leave.from_date,
+          leave.to_date
+        );
       }
+
+      leaveBalances.push({
+        type,
+        total: total,
+        used: usedLeaves,
+        remaining: Math.max(0, total - usedLeaves),
+      });
     }
 
-    // Get latest pending request
     const latestPendingRequest = await Leave.findOne({
       where: {
         created_by: userId,
@@ -83,7 +89,6 @@ const getEmployeeDashboard = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get employee dashboard error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -91,7 +96,6 @@ const getEmployeeDashboard = async (req, res) => {
   }
 };
 
-// Get all users (Admin only)
 const getAllUsers = async (req, res) => {
   try {
     const { page = 1, limit = 10, role = "", search = "" } = req.query;
@@ -133,7 +137,6 @@ const getAllUsers = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get all users error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -141,7 +144,6 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-// Get user by ID
 const getUserById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -173,7 +175,6 @@ const getUserById = async (req, res) => {
       data: { user },
     });
   } catch (error) {
-    console.error("Get user by ID error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -181,12 +182,10 @@ const getUserById = async (req, res) => {
   }
 };
 
-// Create user (Admin only)
 const createUser = async (req, res) => {
   try {
     const { name, email, password, role, manager_id } = req.body;
 
-    // Validate manager assignment
     if (manager_id) {
       const manager = await User.findByPk(manager_id);
       if (!manager || manager.role !== ROLES.MANAGER) {
@@ -197,7 +196,6 @@ const createUser = async (req, res) => {
       }
     }
 
-    // Create user
     const user = await User.create({
       name,
       email,
@@ -206,13 +204,7 @@ const createUser = async (req, res) => {
       manager_id,
     });
 
-    // Log user creation
     await AuditLog.logAction(req.user.id, "user", user.id.toString(), "create");
-
-    // Email simulation
-    console.log(
-      `Email to ${user.email}: Welcome ${user.name}! Your account has been created.`
-    );
 
     res.status(201).json({
       success: true,
@@ -220,7 +212,6 @@ const createUser = async (req, res) => {
       data: { user },
     });
   } catch (error) {
-    console.error("Create user error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -228,7 +219,6 @@ const createUser = async (req, res) => {
   }
 };
 
-// Update user (Admin only)
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
@@ -242,7 +232,6 @@ const updateUser = async (req, res) => {
       });
     }
 
-    // Check if email already exists (if changing email)
     if (email && email !== user.email) {
       const existingUser = await User.findByEmail(email);
       if (existingUser) {
@@ -253,21 +242,18 @@ const updateUser = async (req, res) => {
       }
     }
 
-    // Handle role change from manager to employee
     if (
       role &&
       role !== user.role &&
       user.role === ROLES.MANAGER &&
       role === ROLES.EMPLOYEE
     ) {
-      // Unassign all reportees
       await User.update(
         { manager_id: null },
         { where: { manager_id: user.id } }
       );
     }
 
-    // Validate manager assignment
     if (manager_id !== undefined) {
       if (manager_id) {
         const manager = await User.findByPk(manager_id);
@@ -277,7 +263,6 @@ const updateUser = async (req, res) => {
             message: "Invalid manager assignment",
           });
         }
-        // Prevent circular assignment
         if (parseInt(manager_id) === parseInt(id)) {
           return res.status(400).json({
             success: false,
@@ -287,7 +272,6 @@ const updateUser = async (req, res) => {
       }
     }
 
-    // Update user - only update provided fields
     const oldData = { ...user.toJSON() };
     const updateData = {};
 
@@ -298,11 +282,7 @@ const updateUser = async (req, res) => {
 
     await user.update(updateData);
 
-    // Log user update
     await AuditLog.logAction(req.user.id, "user", user.id.toString(), "update");
-
-    // Email simulation
-    console.log(`Email to ${user.email}: Your profile has been updated.`);
 
     res.json({
       success: true,
@@ -310,7 +290,6 @@ const updateUser = async (req, res) => {
       data: { user },
     });
   } catch (error) {
-    console.error("Update user error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -318,7 +297,6 @@ const updateUser = async (req, res) => {
   }
 };
 
-// Delete user (Admin only)
 const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
@@ -331,7 +309,6 @@ const deleteUser = async (req, res) => {
       });
     }
 
-    // Prevent self-deletion
     if (parseInt(id) === req.user.id) {
       return res.status(400).json({
         success: false,
@@ -339,7 +316,6 @@ const deleteUser = async (req, res) => {
       });
     }
 
-    // Unassign reportees if user is a manager
     if (user.role === ROLES.MANAGER) {
       await User.update(
         { manager_id: null },
@@ -347,13 +323,8 @@ const deleteUser = async (req, res) => {
       );
     }
 
-    // Log user deletion
     await AuditLog.logAction(req.user.id, "user", user.id.toString(), "delete");
 
-    // Email simulation
-    console.log(`Email to ${user.email}: Your account has been deleted.`);
-
-    // Delete user
     await user.destroy();
 
     res.json({
@@ -361,7 +332,6 @@ const deleteUser = async (req, res) => {
       message: "User deleted successfully",
     });
   } catch (error) {
-    console.error("Delete user error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -369,7 +339,6 @@ const deleteUser = async (req, res) => {
   }
 };
 
-// Get unassigned users (Admin only)
 const getUnassignedUsers = async (req, res) => {
   try {
     const users = await User.findUnassignedUsers();
@@ -379,7 +348,6 @@ const getUnassignedUsers = async (req, res) => {
       data: { users },
     });
   } catch (error) {
-    console.error("Get unassigned users error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -387,17 +355,155 @@ const getUnassignedUsers = async (req, res) => {
   }
 };
 
-// Get managers (Admin only)
 const getManagers = async (req, res) => {
   try {
-    const managers = await User.findManagers();
+    const currentYear = new Date().getFullYear();
+
+    const systemConfig = await SystemConfig.getConfigByYear(currentYear);
+
+    const managers = await User.findAll({
+      where: {
+        role: ROLES.MANAGER,
+      },
+      attributes: [
+        "id",
+        "name",
+        "email",
+        "role",
+        "manager_id",
+        "created_at",
+        "updated_at",
+      ],
+      order: [["name", "ASC"]],
+    });
+
+    const managersWithBalances = await Promise.all(
+      managers.map(async (manager) => {
+        const leaveBalances = {};
+
+        const standardLeaveTypes = ["casual", "sick", "earned"];
+
+        for (const type of standardLeaveTypes) {
+          const total = systemConfig?.leave_types?.[type] || 0;
+
+          const approvedLeaves = await Leave.findAll({
+            where: {
+              created_by: manager.id,
+              type: type,
+              status: "approved",
+            },
+            attributes: ["from_date", "to_date"],
+          });
+
+          let usedLeaves = 0;
+          for (const leave of approvedLeaves) {
+            usedLeaves += systemConfig.getWorkingDaysBetween(
+              leave.from_date,
+              leave.to_date
+            );
+          }
+
+          leaveBalances[type] = {
+            total: total,
+            used: usedLeaves,
+            remaining: Math.max(0, total - usedLeaves),
+          };
+        }
+
+        return {
+          ...manager.toJSON(),
+          leave_balances: leaveBalances,
+        };
+      })
+    );
 
     res.json({
       success: true,
-      data: { managers },
+      message: "Managers retrieved successfully",
+      data: {
+        managers: managersWithBalances,
+      },
     });
   } catch (error) {
-    console.error("Get managers error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+const getAssignedUsers = async (req, res) => {
+  try {
+    const managerId = req.user.id;
+    const currentYear = new Date().getFullYear();
+
+    const systemConfig = await SystemConfig.getConfigByYear(currentYear);
+
+    const assignedUsers = await User.findAll({
+      where: {
+        manager_id: managerId,
+        role: ROLES.EMPLOYEE,
+      },
+      attributes: [
+        "id",
+        "name",
+        "email",
+        "role",
+        "manager_id",
+        "created_at",
+        "updated_at",
+      ],
+      order: [["name", "ASC"]],
+    });
+
+    const usersWithBalances = await Promise.all(
+      assignedUsers.map(async (user) => {
+        const leaveBalances = {};
+
+        const standardLeaveTypes = ["casual", "sick", "earned"];
+
+        for (const type of standardLeaveTypes) {
+          const total = systemConfig?.leave_types?.[type] || 0;
+
+          const approvedLeaves = await Leave.findAll({
+            where: {
+              created_by: user.id,
+              type: type,
+              status: "approved",
+            },
+            attributes: ["from_date", "to_date"],
+          });
+
+          let usedLeaves = 0;
+          for (const leave of approvedLeaves) {
+            usedLeaves += systemConfig.getWorkingDaysBetween(
+              leave.from_date,
+              leave.to_date
+            );
+          }
+
+          leaveBalances[type] = {
+            total: total,
+            used: usedLeaves,
+            remaining: Math.max(0, total - usedLeaves),
+          };
+        }
+
+        return {
+          ...user.toJSON(),
+          leave_balances: leaveBalances,
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      message: "Assigned users retrieved successfully",
+      data: {
+        users: usersWithBalances,
+      },
+    });
+  } catch (error) {
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -406,7 +512,7 @@ const getManagers = async (req, res) => {
 };
 
 module.exports = {
-  getEmployeeDashboard,
+  getUserDashboard,
   getAllUsers,
   getUserById,
   createUser,
@@ -414,4 +520,5 @@ module.exports = {
   deleteUser,
   getUnassignedUsers,
   getManagers,
+  getAssignedUsers,
 };

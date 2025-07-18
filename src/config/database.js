@@ -1,10 +1,5 @@
 const { Sequelize } = require("sequelize");
 require("dotenv").config({ path: "./config.env" });
-console.log("db_user", process.env.DB_USER);
-console.log("db_password", process.env.DB_PASSWORD);
-console.log("db_name", process.env.DB_NAME);
-console.log("db_host", process.env.DB_HOST);
-console.log("db_port", process.env.DB_PORT);
 const config = {
   development: {
     username: process.env.DB_USER,
@@ -13,7 +8,8 @@ const config = {
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
     dialect: "mysql",
-    logging: console.log,
+    logging: false,
+    timezone: "+00:00",
     pool: {
       max: 5,
       min: 0,
@@ -34,6 +30,7 @@ const config = {
     port: process.env.DB_PORT,
     dialect: "mysql",
     logging: false,
+    timezone: "+00:00",
     pool: {
       max: 5,
       min: 0,
@@ -54,13 +51,13 @@ const config = {
     port: process.env.DB_PORT,
     dialect: "mysql",
     logging: false,
+    timezone: "+00:00",
   },
 };
 
 const env = process.env.NODE_ENV || "development";
 const dbConfig = config[env];
 
-// Support for DATABASE_URL (for cloud platforms like Aiven, PlanetScale)
 let sequelize;
 if (process.env.DATABASE_URL) {
   sequelize = new Sequelize(process.env.DATABASE_URL, {
@@ -68,13 +65,14 @@ if (process.env.DATABASE_URL) {
     logging: dbConfig.logging,
     pool: dbConfig.pool,
     define: dbConfig.define,
+    timezone: "+00:00",
     dialectOptions: {
       ssl: {
         require: true,
         rejectUnauthorized: false,
       },
-      // Aiven specific SSL configuration
       sslMode: "REQUIRED",
+      timezone: "+00:00",
     },
   });
 } else {
@@ -89,25 +87,23 @@ if (process.env.DATABASE_URL) {
       logging: dbConfig.logging,
       pool: dbConfig.pool,
       define: dbConfig.define,
+      timezone: "+00:00",
       dialectOptions: {
         ssl: {
           require: true,
           rejectUnauthorized: false,
         },
         sslMode: "REQUIRED",
+        timezone: "+00:00",
       },
     }
   );
 }
 
-// Test database connection
 const testConnection = async () => {
   try {
     await sequelize.authenticate();
-    console.log("✅ Database connection established successfully.");
-  } catch (error) {
-    console.error("❌ Unable to connect to the database:", error);
-  }
+  } catch (error) {}
 };
 
 module.exports = { sequelize, testConnection };

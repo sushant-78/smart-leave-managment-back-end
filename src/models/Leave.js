@@ -1,4 +1,4 @@
-const { DataTypes } = require("sequelize");
+const { DataTypes, Op } = require("sequelize");
 const { sequelize } = require("../config/database");
 const { LEAVE_STATUS, LEAVE_TYPES } = require("../config/auth");
 
@@ -55,7 +55,6 @@ const Leave = sequelize.define(
       allowNull: false,
       validate: {
         notEmpty: true,
-        len: [10, 1000],
       },
     },
     status: {
@@ -78,9 +77,10 @@ const Leave = sequelize.define(
   {
     tableName: "leaves",
     timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
     hooks: {
       beforeValidate: (leave) => {
-        // Ensure to_date is not before from_date
         if (leave.from_date && leave.to_date) {
           const fromDate = new Date(leave.from_date);
           const toDate = new Date(leave.to_date);
@@ -93,7 +93,6 @@ const Leave = sequelize.define(
   }
 );
 
-// Instance methods
 Leave.prototype.getDuration = function () {
   const fromDate = new Date(this.from_date);
   const toDate = new Date(this.to_date);
@@ -110,7 +109,6 @@ Leave.prototype.canBeApproved = function () {
   return this.status === LEAVE_STATUS.PENDING;
 };
 
-// Class methods
 Leave.findPendingLeaves = function () {
   return this.findAll({
     where: { status: LEAVE_STATUS.PENDING },
@@ -177,42 +175,39 @@ Leave.findOverlappingLeaves = function (
   const whereClause = {
     created_by: userId,
     status: [LEAVE_STATUS.PENDING, LEAVE_STATUS.APPROVED],
-    [sequelize.Op.or]: [
+    [Op.or]: [
       {
         from_date: {
-          [sequelize.Op.between]: [fromDate, toDate],
+          [Op.between]: [fromDate, toDate],
         },
       },
       {
         to_date: {
-          [sequelize.Op.between]: [fromDate, toDate],
+          [Op.between]: [fromDate, toDate],
         },
       },
       {
-        [sequelize.Op.and]: [
-          { from_date: { [sequelize.Op.lte]: fromDate } },
-          { to_date: { [sequelize.Op.gte]: toDate } },
+        [Op.and]: [
+          { from_date: { [Op.lte]: fromDate } },
+          { to_date: { [Op.gte]: toDate } },
         ],
       },
     ],
   };
 
   if (excludeId) {
-    whereClause.id = { [sequelize.Op.ne]: excludeId };
+    whereClause.id = { [Op.ne]: excludeId };
   }
 
   return this.findAll({ where: whereClause });
 };
 
-// Associations
 Leave.associate = (models) => {
-  // Association with User who created the leave
   Leave.belongsTo(models.User, {
     foreignKey: "created_by",
     as: "creator",
   });
 
-  // Association with User who manages the leave
   Leave.belongsTo(models.User, {
     foreignKey: "manager_id",
     as: "manager",

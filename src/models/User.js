@@ -68,7 +68,6 @@ const User = sequelize.define(
   }
 );
 
-// Instance methods
 User.prototype.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
@@ -79,7 +78,6 @@ User.prototype.toJSON = function () {
   return values;
 };
 
-// Class methods
 User.findByEmail = function (email) {
   return this.findOne({ where: { email } });
 };
@@ -101,9 +99,7 @@ User.findUnassignedUsers = function () {
   });
 };
 
-// Associations
 User.associate = (models) => {
-  // Self-referencing association for manager-employee relationship
   User.belongsTo(User, {
     as: "manager",
     foreignKey: "manager_id",
@@ -114,19 +110,16 @@ User.associate = (models) => {
     foreignKey: "manager_id",
   });
 
-  // Leave associations - leaves created by this user
   User.hasMany(models.Leave, {
     foreignKey: "created_by",
     as: "createdLeaves",
   });
 
-  // Leave associations - leaves managed by this user
   User.hasMany(models.Leave, {
     foreignKey: "manager_id",
     as: "managedLeaves",
   });
 
-  // AuditLog associations
   User.hasMany(models.AuditLog, {
     foreignKey: "created_by",
     as: "auditLogs",

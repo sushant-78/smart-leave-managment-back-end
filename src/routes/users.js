@@ -9,7 +9,7 @@ const {
   validateUserUpdate,
 } = require("../middleware/validation");
 const {
-  getEmployeeDashboard,
+  getUserDashboard,
   getAllUsers,
   getUserById,
   createUser,
@@ -21,31 +21,22 @@ const {
 
 const router = express.Router();
 
-// All routes require authentication
 router.use(authMiddleware);
 
-// GET /api/users/dashboard - Get employee dashboard data
-router.get("/employees/dashboard", getEmployeeDashboard);
+router.get("/dashboard", getUserDashboard);
 
-// GET /api/users - Get all users (Admin only)
 router.get("/", requireAdmin, getAllUsers);
 
-// GET /api/users/unassigned - Get unassigned users (Admin only)
 router.get("/unassigned", requireAdmin, getUnassignedUsers);
 
-// GET /api/users/managers - Get all managers (Admin only)
 router.get("/managers", requireAdmin, getManagers);
 
-// GET /api/users/:id - Get user by ID (Admin or own profile)
 router.get("/:id", requireOwnershipOrAdmin, getUserById);
 
-// POST /api/users - Create new user (Admin only)
 router.post("/", requireAdmin, validateUserCreation, createUser);
 
-// PATCH /api/users/:id - Update user (Admin only)
 router.patch("/:id", requireAdmin, validateUserUpdate, updateUser);
 
-// DELETE /api/users/:id - Delete user (Admin only)
 router.delete("/:id", requireAdmin, deleteUser);
 
 module.exports = router;
