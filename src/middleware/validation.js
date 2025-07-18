@@ -46,11 +46,16 @@ const validateUserCreation = (req, res, next) => {
       .messages({
         "any.only": "Role must be employee, manager, or admin",
       }),
-    manager_id: Joi.number().integer().positive().optional().messages({
-      "number.base": "Manager ID must be a number",
-      "number.integer": "Manager ID must be an integer",
-      "number.positive": "Manager ID must be positive",
-    }),
+    manager_id: Joi.number()
+      .integer()
+      .positive()
+      .allow(null)
+      .optional()
+      .messages({
+        "number.base": "Manager ID must be a number",
+        "number.integer": "Manager ID must be an integer",
+        "number.positive": "Manager ID must be positive",
+      }),
   });
 
   const { error } = schema.validate(req.body);
